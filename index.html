@@ -59,7 +59,7 @@
         <div class="dot" id="statusDot" style="background:var(--warn)"></div>
         <div>
           <div style="font-weight:900;letter-spacing:.2px">BTC自動交易機器人 · TG 控制面板</div>
-          <div class="sub">Sprint1（前端雛形）— 之後接 n8n / API / Apps Script 都行</div>
+          <div class="sub">Sprint1（前端雛形）— Web Panel → Cloudflare Worker → Telegram</div>
         </div>
       </div>
       <div class="right">
@@ -141,8 +141,8 @@
 
     <!-- Right: Commands + Settings -->
     <div class="card">
-      <div class="title">指令中心（送到 TG / 後端）</div>
-      <div class="sub">目前先記錄指令歷史；你接後端後，把 sendCommand() 的 fetch 打開即可。</div>
+      <div class="title">指令中心（送到 TG / 中轉）</div>
+      <div class="sub">已改成：面板會呼叫 Worker <span class="mono">/cmd</span>，然後推送到你的 TG。</div>
 
       <div class="hr"></div>
 
@@ -165,15 +165,23 @@
 
       <div class="hr"></div>
 
-      <div class="title" style="margin-top:0">連線設定（預留）</div>
+      <div class="title" style="margin-top:0">連線設定</div>
       <div class="split">
         <div>
           <label class="small">API / Webhook Base URL</label>
-          <input id="apiBase" class="mono" placeholder="例如：https://your-n8n-webhook/xxx" />
+          <input id="apiBase" class="mono" placeholder="例如：https://xxx.workers.dev" />
         </div>
         <div>
-          <label class="small">Telegram Chat ID（推播用）</label>
-          <input id="chatId" class="mono" placeholder="例如：123456789" />
+          <label class="small">Telegram Chat ID（推播用，可空）</label>
+          <input id="chatId" class="mono" placeholder="例如：1632599756" />
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label class="small">Panel Secret（對應 Worker 的 PANEL_SECRET）</label>
+        <input id="panelSecret" class="mono" placeholder="例如：my-super-secret-2026" />
+        <div class="small" style="margin-top:6px;">
+          這個是用來避免別人亂打你的 <span class="mono">/cmd</span>。請填 Worker 上設定的同一串。
         </div>
       </div>
 
@@ -183,8 +191,8 @@
 
       <div class="hr"></div>
 
-      <div class="title">指令歷史</div>
-      <div id="log" style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(0,0,0,.12)"></div>
+      <div class="title">指令歷史 / 回應</div>
+      <div id="log" style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(0,0,0,.12)"></div>
     </div>
   </div>
 </div>
@@ -265,7 +273,7 @@
     const raw = localStorage.getItem(LS_KEY);
     if (raw) return JSON.parse(raw);
     return {
-      settings: { apiBase:"", chatId:"" },
+      settings: { apiBase:"", chatId:"", panelSecret:"" },
       runtime: { runState:"PAUSED", lastBeat:null, dayPnl:0, monthPnl:0 },
       bots: [
         { id: crypto.randomUUID(), name:"GRID-01", symbol:"BTC-USDT", type:"GRID", state:"RUNNING", lower:64000, upper:72000, grids:35, per:10 },
@@ -279,7 +287,6 @@
   let editingId = null;
 
   function render(){
-    // status dot
     const dot = document.getElementById("statusDot");
     const runState = db.runtime.runState;
     document.getElementById("runState").textContent = runState;
@@ -287,17 +294,15 @@
     document.getElementById("lastBeat").textContent = db.runtime.lastBeat || "—";
     dot.style.background = runState === "RUNNING" ? "var(--ok)" : "var(--warn)";
 
-    // KPIs
     document.getElementById("kpiDay").textContent = Number(db.runtime.dayPnl).toFixed(2);
     document.getElementById("kpiMonth").textContent = Number(db.runtime.monthPnl).toFixed(2);
     document.getElementById("kpiBots").textContent = db.bots.length;
     document.getElementById("kpiEvents").textContent = db.logs.length;
 
-    // settings
     document.getElementById("apiBase").value = db.settings.apiBase || "";
     document.getElementById("chatId").value = db.settings.chatId || "";
+    document.getElementById("panelSecret").value = db.settings.panelSecret || "";
 
-    // bots table
     const tb = document.querySelector("#botTable tbody");
     tb.innerHTML = "";
     db.bots.forEach(b=>{
@@ -315,23 +320,27 @@
       tb.appendChild(tr);
     });
 
-    // logs
     const log = document.getElementById("log");
     log.innerHTML = db.logs.slice().reverse().map(x=>`
       <div style="margin-bottom:8px;">
         <div class="small mono">${escapeHtml(x.ts)} · <span class="tag">${escapeHtml(x.type)}</span></div>
-        <div class="mono">${escapeHtml(x.msg)}</div>
+        <div class="mono" style="white-space:pre-wrap">${escapeHtml(x.msg)}</div>
       </div>
     `).join("") || `<div class="small">（尚無）</div>`;
   }
 
   function escapeHtml(s){
-    return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    return String(s)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
   }
 
   function addLog(type,msg){
     db.logs.push({ ts: nowISO(), type, msg });
-    if (db.logs.length>200) db.logs = db.logs.slice(-200);
+    if (db.logs.length>250) db.logs = db.logs.slice(-250);
     save(db); render();
   }
 
@@ -350,6 +359,7 @@
   document.getElementById("btnSaveSettings").onclick = () => {
     db.settings.apiBase = document.getElementById("apiBase").value.trim();
     db.settings.chatId = document.getElementById("chatId").value.trim();
+    db.settings.panelSecret = document.getElementById("panelSecret").value.trim();
     save(db); addLog("SYSTEM","Settings saved");
   };
 
@@ -357,20 +367,40 @@
   async function sendCommand(cmd){
     cmd = (cmd||"").trim();
     if (!cmd) return;
+
     addLog("CMD", cmd);
 
-    // TODO: 你接後端時，把下面打開：
-    // const API_BASE = db.settings.apiBase;
-    // if (API_BASE) {
-    //   const res = await fetch(API_BASE, { method:"POST", headers:{ "Content-Type":"application/json" },
-    //     body: JSON.stringify({ cmd, chatId: db.settings.chatId, source:"panel" })
-    //   });
-    //   const data = await res.json().catch(()=>null);
-    //   addLog("RESP", JSON.stringify(data ?? { ok:true }, null, 2));
-    // }
+    const API_BASE = (db.settings.apiBase || "").trim();
+    const SECRET = (db.settings.panelSecret || "").trim();
 
-    // demo response
-    addLog("RESP", `{"ok":true,"echo":${JSON.stringify(cmd)}}`);
+    if (!API_BASE) {
+      addLog("RESP", "⚠️ 尚未設定 API Base URL（請到 Settings 填 https://xxx.workers.dev）");
+      return;
+    }
+    if (!SECRET) {
+      addLog("RESP", "⚠️ 尚未設定 Panel Secret（請到 Settings 填 Worker 的 PANEL_SECRET）");
+      return;
+    }
+
+    const endpoint = API_BASE.replace(/\/$/,"") + "/cmd";
+
+    try {
+      const res = await fetch(endpoint, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          cmd,
+          chatId: (db.settings.chatId || "").trim(), // 可空
+          secret: SECRET
+        })
+      });
+
+      const text = await res.text(); // 用 text 方便看錯誤（403/404/CORS）
+      addLog("RESP", `HTTP ${res.status}\n${text}`);
+
+    } catch (e) {
+      addLog("RESP", "❌ fetch 失敗：" + (e?.message || String(e)));
+    }
   }
 
   document.querySelectorAll("[data-cmd]").forEach(b=>{
@@ -451,3 +481,4 @@
 </script>
 </body>
 </html>
+
