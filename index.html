@@ -345,7 +345,7 @@
   }
 
   // ===== Runtime buttons =====
-  document.getElementById("btnRun").onclick = async () => {
+document.getElementById("btnRun").onclick = async () => {
   db.runtime.runState = "RUNNING";
   db.runtime.lastBeat = nowISO();
   addLog("SYSTEM","Run => RUNNING");
@@ -364,6 +364,7 @@ document.getElementById("btnPing").onclick = async () => {
   addLog("PING","Heartbeat OK");
   await pushStateToWorker_();
 };
+
 
 
   document.getElementById("btnReset").onclick = () => {
@@ -487,7 +488,7 @@ async function pushStateToWorker_() {
     if (bot) openModal(bot);
   });
 
-  document.getElementById("mSave").onclick = () => {
+  document.getElementById("mSave").onclick = async () => {
     const bot = {
       id: editingId || crypto.randomUUID(),
       name: document.getElementById("mName").value.trim() || "GRID-NEW",
@@ -513,7 +514,7 @@ async function pushStateToWorker_() {
     closeModal(); render();
   };
 
-  document.getElementById("mDelete").onclick = () => {
+  document.getElementById("mDelete").onclick = async () => {
     if (!editingId) return;
     const bot = db.bots.find(x=>x.id===editingId);
     if (!bot) return;
@@ -530,6 +531,7 @@ async function pushStateToWorker_() {
 </script>
 </body>
 </html>
+
 
 
 
