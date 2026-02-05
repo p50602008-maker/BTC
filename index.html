@@ -345,9 +345,26 @@
   }
 
   // ===== Runtime buttons =====
-  document.getElementById("btnRun").onclick = () => { db.runtime.runState="RUNNING"; db.runtime.lastBeat=nowISO(); addLog("SYSTEM","Run => RUNNING"); };
-  document.getElementById("btnPause").onclick = () => { db.runtime.runState="PAUSED"; db.runtime.lastBeat=nowISO(); addLog("SYSTEM","Pause => PAUSED"); };
-  document.getElementById("btnPing").onclick = () => { db.runtime.lastBeat=nowISO(); addLog("PING","Heartbeat OK"); };
+  document.getElementById("btnRun").onclick = async () => {
+  db.runtime.runState = "RUNNING";
+  db.runtime.lastBeat = nowISO();
+  addLog("SYSTEM","Run => RUNNING");
+  await pushStateToWorker_();
+};
+
+document.getElementById("btnPause").onclick = async () => {
+  db.runtime.runState = "PAUSED";
+  db.runtime.lastBeat = nowISO();
+  addLog("SYSTEM","Pause => PAUSED");
+  await pushStateToWorker_();
+};
+
+document.getElementById("btnPing").onclick = async () => {
+  db.runtime.lastBeat = nowISO();
+  addLog("PING","Heartbeat OK");
+  await pushStateToWorker_();
+};
+
 
   document.getElementById("btnReset").onclick = () => {
     localStorage.removeItem(LS_KEY);
@@ -362,6 +379,36 @@
     db.settings.panelSecret = document.getElementById("panelSecret").value.trim();
     save(db); addLog("SYSTEM","Settings saved");
   };
+async function pushStateToWorker_() {
+  const API_BASE = (db.settings.apiBase || "").trim();
+  const SECRET = (db.settings.panelSecret || "").trim();
+  if (!API_BASE || !SECRET) return;
+
+  const endpoint = API_BASE.replace(/\/$/,"") + "/state";
+  const payload = {
+    secret: SECRET,
+    runtime: db.runtime,
+    bots: db.bots.map(b => ({
+      name: b.name, symbol: b.symbol, type: b.type, state: b.state,
+      lower: b.lower, upper: b.upper, grids: b.grids, per: b.per
+    }))
+  };
+
+  try {
+    const res = await fetch(endpoint, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    // 不要太吵，只在錯誤時記 log
+    if (!res.ok) {
+      const t = await res.text();
+      addLog("RESP", `pushState HTTP ${res.status}\n${t}`);
+    }
+  } catch(e) {
+    addLog("RESP", "pushState 失敗：" + (e?.message || String(e)));
+  }
+}
 
   // ===== Commands =====
   async function sendCommand(cmd){
@@ -481,4 +528,5 @@
 </script>
 </body>
 </html>
+
 
