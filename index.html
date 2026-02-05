@@ -509,6 +509,7 @@ async function pushStateToWorker_() {
     if (idx>=0) db.bots[idx]=bot; else db.bots.unshift(bot);
     save(db);
     addLog("BOT", (idx>=0?"Update ":"Create ") + bot.name);
+    await pushStateToWorker_();
     closeModal(); render();
   };
 
@@ -520,6 +521,7 @@ async function pushStateToWorker_() {
     db.bots = db.bots.filter(x=>x.id!==editingId);
     save(db);
     addLog("BOT","Delete " + bot.name);
+    await pushStateToWorker_();
     closeModal(); render();
   };
 
@@ -528,5 +530,6 @@ async function pushStateToWorker_() {
 </script>
 </body>
 </html>
+
 
 
